@@ -1,0 +1,72 @@
+# CNiS-MCP Server - Docker Compose Configuration
+version: '3.8'
+
+services:
+  cnis-mcp-server:
+    build: .
+    container_name: cnis-mcp-server
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    environment:
+      - NODE_ENV=production
+      - HTTP_MODE=${HTTP_MODE:-false}
+      - PORT=${PORT:-3000}
+      - CACHE_TTL_MINUTES=${CACHE_TTL_MINUTES:-15}
+      - NEWS_FETCH_INTERVAL=${NEWS_FETCH_INTERVAL:-900000}
+      - MAX_NEWS_AGE_HOURS=${MAX_NEWS_AGE_HOURS:-24}
+      - CREDIBILITY_THRESHOLD=${CREDIBILITY_THRESHOLD:-40}
+      - IMPACT_THRESHOLD=${IMPACT_THRESHOLD:-50}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - TZ=${TZ:-UTC}
+    ports:
+      - "${PORT:-3000}:3000"
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - cnis-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "console.log('healthy')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # HTTP Mode Service (alternative configuration)
+  cnis-mcp-http:
+    build: .
+    container_name: cnis-mcp-http
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - HTTP_MODE=true
+      - PORT=3000
+      - CACHE_TTL_MINUTES=${CACHE_TTL_MINUTES:-15}
+      - NEWS_FETCH_INTERVAL=${NEWS_FETCH_INTERVAL:-900000}
+      - MAX_NEWS_AGE_HOURS=${MAX_NEWS_AGE_HOURS:-24}
+      - CREDIBILITY_THRESHOLD=${CREDIBILITY_THRESHOLD:-40}
+      - IMPACT_THRESHOLD=${IMPACT_THRESHOLD:-50}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - TZ=${TZ:-UTC}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - cnis-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    profiles:
+      - http
+
+networks:
+  cnis-network:
+    driver: bridge
+
+volumes:
+  cnis-logs:
+    driver: local
