@@ -69,7 +69,7 @@ export function getUniversalConfig(): UniversalServerConfig {
         {
           name: 'openai',
           type: 'openai' as const,
-          apiKey: process.env.OPENAI_API_KEY,
+          ...(process.env.OPENAI_API_KEY && { apiKey: process.env.OPENAI_API_KEY }),
           model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
           maxTokens: parseInt(process.env.OPENAI_MAX_TOKENS || '4096'),
           temperature: parseFloat(process.env.OPENAI_TEMPERATURE || '0.7')
@@ -77,7 +77,7 @@ export function getUniversalConfig(): UniversalServerConfig {
         {
           name: 'anthropic',
           type: 'anthropic' as const,
-          apiKey: process.env.ANTHROPIC_API_KEY,
+          ...(process.env.ANTHROPIC_API_KEY && { apiKey: process.env.ANTHROPIC_API_KEY }),
           model: process.env.ANTHROPIC_MODEL || 'claude-3-haiku-20240307',
           maxTokens: parseInt(process.env.ANTHROPIC_MAX_TOKENS || '4096'),
           temperature: parseFloat(process.env.ANTHROPIC_TEMPERATURE || '0.7')

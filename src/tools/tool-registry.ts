@@ -71,7 +71,7 @@ async function initializeTools(): Promise<UniversalTool[]> {
           real_time: z.boolean().default(false)
         });
 
-        const { count, filter_impact, include_sentiment, max_age_hours, real_time } = schema.parse(params);
+        const { count, filter_impact, include_sentiment } = schema.parse(params);
 
         // Collect and analyze news (preserved from original)
         const rawNews = await newsCollector.collectAllNews();

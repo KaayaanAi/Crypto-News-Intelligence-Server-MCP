@@ -110,7 +110,7 @@ export class StdioProtocolHandler implements StdioHandler {
     }
   }
 
-  async handleRequest(request: any): Promise<any> {
+  async handleRequest(_request: any): Promise<any> {
     // Requests are handled through the MCP SDK server
     // This method is for interface compliance
     throw new Error('STDIO protocol uses MCP SDK transport, not direct request handling');

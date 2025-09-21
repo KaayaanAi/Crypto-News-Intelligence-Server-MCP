@@ -1,46 +1,38 @@
 # CNiS-MCP Server - Production Docker Image
-FROM node:18-alpine
+FROM node:22-alpine
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apk add --no-cache \
-    curl \
-    && rm -rf /var/cache/apk/*
-
-# Create non-root user for security
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
+# Update Alpine system packages and install dependencies, create user, and setup directories
+RUN apk update && apk upgrade && \
+    apk add --no-cache curl && \
+    rm -rf /var/cache/apk/* && \
+    addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001 && \
+    mkdir -p /app/logs && \
+    npm install -g npm@latest
 
 # Copy package files
 COPY package*.json ./
 COPY tsconfig.json ./
+COPY healthcheck.js ./
 
-# Install ALL dependencies (including dev dependencies for build)
-RUN npm ci --silent
-
-# Copy source code
+# Install dependencies, copy source, build, and cleanup in single layer
 COPY src/ ./src/
-
-# Build TypeScript
-RUN npm run build && \
-    chmod +x build/index.js
-
-# Remove dev dependencies and source after build
-RUN npm prune --production && \
-    rm -rf src/ tsconfig.json
-
-# Create necessary directories
-RUN mkdir -p /app/logs && \
+RUN npm ci --silent && \
+    npm run build && \
+    chmod +x build/index.js && \
+    npm prune --production && \
+    rm -rf src/ tsconfig.json && \
     chown -R nodejs:nodejs /app
 
 # Switch to non-root user
 USER nodejs
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD node -e "console.log('Health check passed')" || exit 1
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD ["node", "healthcheck.js"]
 
 # Expose port (for HTTP mode)
 EXPOSE 3000

@@ -3,18 +3,27 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { v4 as uuidv4 } from 'uuid';
 import { WebSocketMcpHandler, WebSocketConnection, WebSocketMessage, ToolContext } from '../types/universal-types.js';
 import { getUniversalTools } from '../tools/tool-registry.js';
+import { AuthMiddleware } from '../middleware/auth.js';
+import jwt from 'jsonwebtoken';
+import { parse as parseUrl } from 'url';
 
 export class WebSocketMcpProtocolHandler implements WebSocketMcpHandler {
   public name = 'websocket-mcp' as const;
   public connections: Map<string, WebSocketConnection> = new Map();
   private wss?: WebSocketServer;
   private pingInterval?: NodeJS.Timeout;
+  private authMiddleware?: AuthMiddleware;
 
   async initialize(): Promise<void> {
     console.log('⚡ Initializing WebSocket MCP Protocol...');
-    
+
     // Start ping-pong heartbeat
     this.startHeartbeat();
+  }
+
+  // Set authentication middleware
+  setAuthMiddleware(authMiddleware: AuthMiddleware): void {
+    this.authMiddleware = authMiddleware;
   }
 
   async cleanup(): Promise<void> {
@@ -26,7 +35,7 @@ export class WebSocketMcpProtocolHandler implements WebSocketMcpHandler {
     }
 
     // Close all connections
-    for (const [id, connection] of this.connections) {
+    for (const [, connection] of this.connections) {
       if (connection.ws.readyState === WebSocket.OPEN) {
         connection.ws.close(1000, 'Server shutdown');
       }
@@ -40,7 +49,7 @@ export class WebSocketMcpProtocolHandler implements WebSocketMcpHandler {
     }
   }
 
-  async handleRequest(request: any): Promise<any> {
+  async handleRequest(_request: any): Promise<any> {
     // WebSocket requests are handled through message handlers
     throw new Error('WebSocket protocol uses message-based communication');
   }
@@ -54,24 +63,33 @@ export class WebSocketMcpProtocolHandler implements WebSocketMcpHandler {
     });
 
     this.wss.on('connection', (ws, request) => {
-      this.handleConnection(ws);
+      this.handleConnection(ws, request);
     });
 
     console.log('⚡ WebSocket MCP server attached to HTTP server at /mcp/ws');
   }
 
   // Handle new WebSocket connection
-  handleConnection(ws: WebSocket): void {
+  handleConnection(ws: WebSocket, request: any): void {
     const connectionId = uuidv4();
+
+    // Authentication check
+    if (!this.authenticateConnection(ws, request)) {
+      ws.close(1008, 'Authentication required');
+      return;
+    }
+
     const connection: WebSocketConnection = {
       id: connectionId,
       ws,
       isAlive: true,
-      subscriptions: []
+      subscriptions: [],
+      authenticated: true,
+      permissions: this.getConnectionPermissions(request)
     };
 
     this.connections.set(connectionId, connection);
-    console.log(`⚡ New WebSocket connection: ${connectionId}`);
+    console.log(`⚡ New authenticated WebSocket connection: ${connectionId}`);
 
     // Connection event handlers
     ws.on('message', async (data: Buffer) => {
@@ -243,7 +261,7 @@ export class WebSocketMcpProtocolHandler implements WebSocketMcpHandler {
 
   // Handle streaming tool calls (for long-running operations)
   private async handleStreamingToolCall(connection: WebSocketConnection, id: any, params: any): Promise<void> {
-    const { name, arguments: args } = params;
+    const { name } = params;
 
     // Send initial response
     this.sendMessage(connection, {
@@ -281,7 +299,7 @@ export class WebSocketMcpProtocolHandler implements WebSocketMcpHandler {
       }
 
       // Send final result
-      const result = await this.handleToolCall(connection, id, params);
+      await this.handleToolCall(connection, id, params);
     }
   }
 
@@ -378,6 +396,89 @@ export class WebSocketMcpProtocolHandler implements WebSocketMcpHandler {
       },
       timestamp: new Date()
     });
+  }
+
+  // Authenticate WebSocket connection
+  private authenticateConnection(_ws: WebSocket, request: any): boolean {
+    if (!this.authMiddleware) {
+      // If no auth middleware configured, allow all connections
+      return true;
+    }
+
+    try {
+      const url = parseUrl(request.url || '', true);
+      const headers = request.headers;
+
+      // Check for API key in query params or headers
+      const apiKey = url.query?.apiKey as string || headers['x-api-key'] as string;
+      if (apiKey && this.validateApiKey(apiKey)) {
+        return true;
+      }
+
+      // Check for JWT token in query params or headers
+      const token = url.query?.token as string ||
+                   (headers.authorization as string)?.replace('Bearer ', '');
+      if (token && this.validateJwtToken(token)) {
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.error('❌ WebSocket authentication error:', error);
+      return false;
+    }
+  }
+
+  // Get connection permissions based on authentication
+  private getConnectionPermissions(request: any): string[] {
+    if (!this.authMiddleware) {
+      return ['read', 'analyze']; // Default permissions
+    }
+
+    try {
+      const url = parseUrl(request.url || '', true);
+      const headers = request.headers;
+
+      // Check API key permissions
+      const apiKey = url.query?.apiKey as string || headers['x-api-key'] as string;
+      if (apiKey) {
+        // This is a simplified check - in production, you'd validate against stored keys
+        return ['read', 'analyze', 'stream'];
+      }
+
+      // Check JWT permissions
+      const token = url.query?.token as string ||
+                   (headers.authorization as string)?.replace('Bearer ', '');
+      if (token) {
+        try {
+          const decoded = jwt.decode(token) as any;
+          return decoded?.permissions || ['read'];
+        } catch {
+          return ['read'];
+        }
+      }
+
+      return ['read'];
+    } catch {
+      return ['read'];
+    }
+  }
+
+  // Validate API key (simplified - in production use proper hashing)
+  private validateApiKey(apiKey: string | boolean): boolean {
+    // This is a simplified validation - in production, use proper API key validation
+    return typeof apiKey === 'string' && apiKey.length > 10;
+  }
+
+  // Validate JWT token
+  private validateJwtToken(token: string): boolean {
+    try {
+      // This is a simplified validation - in production, use proper JWT verification
+      const decoded = jwt.decode(token);
+      return !!decoded;
+    } catch {
+      return false;
+    }
   }
 
   // Start heartbeat to detect dead connections

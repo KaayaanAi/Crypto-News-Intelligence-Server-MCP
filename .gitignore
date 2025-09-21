@@ -107,9 +107,23 @@ secrets/
 # Development
 .claude/
 .daddy/
-.qty/
+.qlty/
 .cache/
 .tmp/
+
+# Quality tools
+.qlty/
+*.log
+
+# Security assessment reports (temporary)
+SECURITY_ASSESSMENT_REPORT.md
+
+# Project templates (cleanup)
+daddy_project.md
+
+# Output logs
+http_output.log
+*_output.log
 
 # Test files
 *.test.ts

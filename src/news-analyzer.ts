@@ -449,9 +449,9 @@ export class NewsAnalyzer {
   }
 
   private getSuggestedResponse(
-    action: ActionRecommendation['action'], 
+    action: ActionRecommendation['action'],
     impact: ImpactScore,
-    sentiment: SentimentScore
+    _sentiment: SentimentScore
   ): string {
     switch (action) {
       case 'BULLISH_SIGNAL':

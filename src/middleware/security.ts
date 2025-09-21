@@ -6,7 +6,7 @@ import { Request, Response, NextFunction } from 'express';
 import { UniversalServerConfig } from '../types/universal-types.js';
 
 export class SecurityMiddleware {
-  private config: UniversalServerConfig;
+  private readonly config: UniversalServerConfig;
 
   constructor(config: UniversalServerConfig) {
     this.config = config;
@@ -114,39 +114,49 @@ export class SecurityMiddleware {
 
   // Request validation middleware
   validateRequest() {
-    return (req: Request, res: Response, next: NextFunction) => {
+    return (req: Request, res: Response, next: NextFunction): void => {
       // Check request size
       const contentLength = parseInt(req.get('content-length') || '0');
       if (contentLength > 10 * 1024 * 1024) { // 10MB limit
-        return res.status(413).json({
+        res.status(413).json({
           error: 'Request too large',
           maxSize: '10MB'
         });
+        return;
       }
 
       // Validate Content-Type for POST requests
       if (req.method === 'POST' && !req.is('application/json')) {
-        return res.status(400).json({
+        res.status(400).json({
           error: 'Invalid Content-Type',
           expected: 'application/json'
         });
+        return;
       }
 
       // Validate JSON structure for MCP endpoints (allow JSON-RPC 2.0)
       if (req.path.includes('/mcp') && req.method === 'POST') {
         if (!req.body || typeof req.body !== 'object') {
-          return res.status(400).json({
+          res.status(400).json({
             error: 'Invalid request body',
             expected: 'JSON object'
           });
+          return;
         }
-        
+
         // Additional validation for JSON-RPC 2.0 format
         if (req.body.jsonrpc && req.body.jsonrpc !== '2.0') {
-          return res.status(400).json({
-            error: 'Invalid JSON-RPC version',
-            expected: '2.0'
+          // Return proper JSON-RPC 2.0 error response
+          res.status(400).json({
+            jsonrpc: '2.0',
+            id: req.body.id || null,
+            error: {
+              code: -32600,
+              message: 'Invalid Request',
+              data: 'JSON-RPC version must be 2.0'
+            }
           });
+          return;
         }
       }
 
@@ -156,31 +166,49 @@ export class SecurityMiddleware {
 
   // Error handling middleware
   errorHandler() {
-    return (err: any, req: Request, res: Response, next: NextFunction) => {
+    return (err: any, _req: Request, res: Response, _next: NextFunction): void => {
       console.error('🔒 Security Error:', err);
 
       // Don't leak error details in production
       const isDevelopment = process.env.NODE_ENV === 'development';
-      
+
+      // Handle JSON parsing errors (body-parser errors)
+      if (err.type === 'entity.parse.failed' || err.name === 'SyntaxError') {
+        // Return JSON-RPC 2.0 parse error (-32700)
+        res.status(400).json({
+          jsonrpc: '2.0',
+          id: null,
+          error: {
+            code: -32700,
+            message: 'Parse error',
+            data: isDevelopment ? err.message : 'Invalid JSON'
+          }
+        });
+        return;
+      }
+
       if (err.name === 'ValidationError') {
-        return res.status(400).json({
+        res.status(400).json({
           error: 'Validation failed',
           message: isDevelopment ? err.message : 'Invalid request data'
         });
+        return;
       }
 
       if (err.name === 'UnauthorizedError') {
-        return res.status(401).json({
+        res.status(401).json({
           error: 'Unauthorized',
           message: 'Authentication required'
         });
+        return;
       }
 
       if (err.code === 'LIMIT_FILE_SIZE') {
-        return res.status(413).json({
+        res.status(413).json({
           error: 'File too large',
           message: 'Request exceeds size limit'
         });
+        return;
       }
 
       // Generic error response
@@ -194,7 +222,7 @@ export class SecurityMiddleware {
 
   // Setup timeout middleware
   timeout(timeoutMs: number = 30000) {
-    return (req: Request, res: Response, next: NextFunction) => {
+    return (_req: Request, res: Response, next: NextFunction): void => {
       const timeout = setTimeout(() => {
         if (!res.headersSent) {
           res.status(408).json({
@@ -214,25 +242,25 @@ export class SecurityMiddleware {
 
   // Security headers for API responses
   apiSecurityHeaders() {
-    return (req: Request, res: Response, next: NextFunction) => {
+    return (_req: Request, res: Response, next: NextFunction): void => {
       // API-specific security headers
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.setHeader('Pragma', 'no-cache');
       res.setHeader('Expires', '0');
-      
+
       // Prevent API responses from being embedded
       res.setHeader('X-Frame-Options', 'DENY');
-      
+
       // Add API version header
       res.setHeader('X-API-Version', '2.0.0');
-      
+
       next();
     };
   }
 
   // Rate limiting bypass for health checks
   healthCheckBypass() {
-    return (req: Request, res: Response, next: NextFunction) => {
+    return (req: Request, _res: Response, next: NextFunction): void => {
       if (req.path === '/health' || req.path === '/api/health') {
         // Mark as health check to bypass rate limiting
         (req as any).isHealthCheck = true;

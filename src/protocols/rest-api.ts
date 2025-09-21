@@ -12,7 +12,7 @@ export class RestApiProtocolHandler implements RestApiHandler {
     this.router = Router();
     
     // Add request timing middleware
-    this.router.use((req: any, res, next) => {
+    this.router.use((req: any, _res, next) => {
       req.startTime = Date.now();
       next();
     });
@@ -28,7 +28,7 @@ export class RestApiProtocolHandler implements RestApiHandler {
     console.log('🧹 Cleaning up REST API Protocol...');
   }
 
-  async handleRequest(request: any): Promise<any> {
+  async handleRequest(_request: any): Promise<any> {
     throw new Error('REST API uses Express router for request handling');
   }
 
@@ -75,7 +75,7 @@ export class RestApiProtocolHandler implements RestApiHandler {
   }
 
   // Health check endpoint
-  private async handleHealth(req: Request, res: Response): Promise<void> {
+  private async handleHealth(_req: Request, res: Response): Promise<void> {
     const cacheStats = await this.getCacheStats();
     
     res.json({
@@ -90,7 +90,7 @@ export class RestApiProtocolHandler implements RestApiHandler {
   }
 
   // Detailed status endpoint
-  private async handleStatus(req: Request, res: Response): Promise<void> {
+  private async handleStatus(_req: Request, res: Response): Promise<void> {
     try {
       const tools = await getUniversalTools();
       const cacheStats = await this.getCacheStats();
@@ -128,7 +128,7 @@ export class RestApiProtocolHandler implements RestApiHandler {
   }
 
   // Metrics endpoint
-  private async handleMetrics(req: Request, res: Response): Promise<void> {
+  private async handleMetrics(_req: Request, res: Response): Promise<void> {
     const memUsage = process.memoryUsage();
     
     res.json({
@@ -147,7 +147,7 @@ export class RestApiProtocolHandler implements RestApiHandler {
   }
 
   // Get all available tools
-  private async handleGetTools(req: Request, res: Response): Promise<void> {
+  private async handleGetTools(_req: Request, res: Response): Promise<void> {
     try {
       const tools = await getUniversalTools();
       
@@ -449,7 +449,7 @@ export class RestApiProtocolHandler implements RestApiHandler {
                 <p>${endpoints.description}</p>
             </div>` :
             `<h3>${category}</h3>
-            ${Object.entries(endpoints).map(([name, endpoint]: [string, any]) =>
+            ${Object.entries(endpoints).map(([, endpoint]: [string, any]) =>
               `<div class="endpoint">
                   <span class="method">${endpoint.method}</span> ${endpoint.path}
                   <p>${endpoint.description}</p>

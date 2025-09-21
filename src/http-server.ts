@@ -13,21 +13,21 @@ import { SecurityMiddleware } from './middleware/security.js';
 import { getUniversalConfig } from './config/universal-config.js';
 
 export class UniversalMcpServer {
-  private config: UniversalServerConfig;
-  private app: Express;
-  private httpServer: HttpServer;
-  private protocols: Map<string, ProtocolHandler> = new Map();
-  
+  private readonly config: UniversalServerConfig;
+  private readonly app: Express;
+  private readonly httpServer: HttpServer;
+  private readonly protocols: Map<string, ProtocolHandler> = new Map();
+
   // Middleware instances
-  private authMiddleware: AuthMiddleware;
-  private rateLimitMiddleware: RateLimitMiddleware;
-  private securityMiddleware: SecurityMiddleware;
-  
+  private readonly authMiddleware: AuthMiddleware;
+  private readonly rateLimitMiddleware: RateLimitMiddleware;
+  private readonly securityMiddleware: SecurityMiddleware;
+
   // Protocol handlers
-  private stdioHandler: StdioProtocolHandler;
-  private httpMcpHandler: HttpMcpProtocolHandler;
-  private websocketHandler: WebSocketMcpProtocolHandler;
-  private restApiHandler: RestApiProtocolHandler;
+  private readonly stdioHandler: StdioProtocolHandler;
+  private readonly httpMcpHandler: HttpMcpProtocolHandler;
+  private readonly websocketHandler: WebSocketMcpProtocolHandler;
+  private readonly restApiHandler: RestApiProtocolHandler;
 
   constructor(config?: UniversalServerConfig) {
     this.config = config || getUniversalConfig();
@@ -145,7 +145,7 @@ export class UniversalMcpServer {
   }
 
   // Root endpoint - Universal MCP Server info
-  private handleRoot(req: express.Request, res: express.Response): void {
+  private handleRoot(_req: express.Request, res: express.Response): void {
     res.json({
       name: 'CNiS Universal MCP Server',
       version: '2.0.0',
@@ -194,7 +194,7 @@ export class UniversalMcpServer {
   }
 
   // Health check endpoint
-  private async handleHealthCheck(req: express.Request, res: express.Response): Promise<void> {
+  private async handleHealthCheck(_req: express.Request, res: express.Response): Promise<void> {
     try {
       const authStats = this.authMiddleware.getStats();
       const rateLimitStats = this.rateLimitMiddleware.getStats();
@@ -229,7 +229,7 @@ export class UniversalMcpServer {
   }
 
   // Admin statistics endpoint
-  private async handleAdminStats(req: express.Request, res: express.Response): Promise<void> {
+  private async handleAdminStats(_req: express.Request, res: express.Response): Promise<void> {
     try {
       const stats = {
         server: {
@@ -297,7 +297,7 @@ export class UniversalMcpServer {
       
       this.httpServer.on('error', (error: any) => {
         console.error('❌ HTTP Server Error:', error);
-        reject(error);
+        reject(error instanceof Error ? error : new Error(String(error)));
       });
     });
   }

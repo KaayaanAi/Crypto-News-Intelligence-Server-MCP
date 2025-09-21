@@ -1,11 +1,11 @@
 // Rate Limiting Middleware - Advanced rate limiting with Redis support
 import rateLimit from 'express-rate-limit';
+import { ipKeyGenerator } from 'express-rate-limit';
 import { Request, Response, NextFunction } from 'express';
-import { RateLimitConfig, ApiKey, UniversalServerConfig } from '../types/universal-types.js';
+import { RateLimitConfig, UniversalServerConfig } from '../types/universal-types.js';
 
 export class RateLimitMiddleware {
   private config: UniversalServerConfig;
-  private customLimits: Map<string, RateLimitConfig> = new Map();
 
   constructor(config: UniversalServerConfig) {
     this.config = config;
@@ -30,9 +30,9 @@ export class RateLimitMiddleware {
         return !!(req as any).isHealthCheck;
       },
       keyGenerator: (req: Request) => {
-        // Use API key if present, otherwise IP
+        // Use API key if present, otherwise IP with IPv6 support
         const apiKey = req.headers['x-api-key'] as string;
-        return apiKey || req.ip || 'unknown';
+        return apiKey || ipKeyGenerator(req.ip || 'unknown');
       }
     });
   }
@@ -51,7 +51,7 @@ export class RateLimitMiddleware {
       legacyHeaders: false,
       keyGenerator: (req: Request) => {
         const apiKey = req.headers['x-api-key'] as string;
-        return apiKey ? `api:${apiKey}` : `ip:${req.ip}`;
+        return apiKey ? `api:${apiKey}` : `ip:${ipKeyGenerator(req.ip || 'unknown')}`;
       }
     });
   }
@@ -93,48 +93,51 @@ export class RateLimitMiddleware {
       },
       keyGenerator: (req: Request) => {
         const apiKey = req.headers['x-api-key'] as string;
-        return apiKey ? `tool:${toolName}:${apiKey}` : `tool:${toolName}:${req.ip}`;
+        return apiKey ? `tool:${toolName}:${apiKey}` : `tool:${toolName}:${ipKeyGenerator(req.ip || 'unknown')}`;
       }
     });
   }
 
   // Custom rate limiter for API keys with specific limits
   getApiKeyRateLimit() {
-    return async (req: Request, res: Response, next: NextFunction) => {
+    return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       const apiKey = req.headers['x-api-key'] as string;
-      
+
       if (!apiKey) {
-        return next(); // Let global rate limiter handle non-API key requests
+        next(); // Let global rate limiter handle non-API key requests
+        return;
       }
 
       try {
         // This would typically check against a database
         // For now, we'll simulate API key limits
         const keyLimits = this.getApiKeyLimits(apiKey);
-        
+
         if (!keyLimits) {
-          return res.status(401).json({
+          res.status(401).json({
             error: 'Invalid API key',
             message: 'The provided API key is not valid'
           });
+          return;
         }
 
         // Check if this API key has exceeded its custom limits
         const usage = await this.checkApiKeyUsage(apiKey);
-        
+
         if (usage.requests >= keyLimits.max) {
-          return res.status(429).json({
+          res.status(429).json({
             error: 'API key rate limit exceeded',
             message: 'Your API key has exceeded its rate limit',
             limit: keyLimits.max,
             used: usage.requests,
             resetTime: usage.resetTime
           });
+          return;
         }
 
         // Record this request
         await this.recordApiKeyUsage(apiKey);
-        
+
         // Add rate limit info to response headers
         res.setHeader('X-RateLimit-Limit', keyLimits.max.toString());
         res.setHeader('X-RateLimit-Remaining', (keyLimits.max - usage.requests - 1).toString());
@@ -153,27 +156,28 @@ export class RateLimitMiddleware {
   getSlidingWindowRateLimit(windowMs: number, maxRequests: number) {
     const windows = new Map<string, number[]>();
 
-    return (req: Request, res: Response, next: NextFunction) => {
-      const key = req.headers['x-api-key'] as string || req.ip || 'unknown';
+    return (req: Request, res: Response, next: NextFunction): void => {
+      const key = req.headers['x-api-key'] as string || ipKeyGenerator(req.ip || 'unknown');
       const now = Date.now();
       const windowStart = now - windowMs;
 
       // Get or create window for this key
       let requests = windows.get(key) || [];
-      
+
       // Remove old requests outside the window
       requests = requests.filter(timestamp => timestamp > windowStart);
-      
+
       // Check if limit is exceeded
       if (requests.length >= maxRequests) {
         const oldestRequest = Math.min(...requests);
         const retryAfter = Math.ceil((oldestRequest + windowMs - now) / 1000);
-        
-        return res.status(429).json({
+
+        res.status(429).json({
           error: 'Rate limit exceeded',
           message: 'Too many requests in sliding window',
           retryAfter
         });
+        return;
       }
 
       // Add current request
@@ -208,7 +212,7 @@ export class RateLimitMiddleware {
         message: `Too many requests via ${protocol} protocol`
       },
       keyGenerator: (req: Request) => {
-        return `${protocol}:${req.headers['x-api-key'] || req.ip}`;
+        return `${protocol}:${req.headers['x-api-key'] || ipKeyGenerator(req.ip || 'unknown')}`;
       }
     });
   }
@@ -234,7 +238,7 @@ export class RateLimitMiddleware {
   }
 
   // Helper methods for API key management
-  private getApiKeyLimits(apiKey: string): RateLimitConfig | null {
+  private getApiKeyLimits(_apiKey: string): RateLimitConfig | null {
     // This would typically query a database
     // For demonstration, we'll use a simple map
     const defaultLimits: RateLimitConfig = {
@@ -248,12 +252,12 @@ export class RateLimitMiddleware {
     return defaultLimits;
   }
 
-  private async checkApiKeyUsage(apiKey: string): Promise<{ requests: number; resetTime: number }> {
+  private async checkApiKeyUsage(_apiKey: string): Promise<{ requests: number; resetTime: number }> {
     // This would typically query Redis or another fast store
     // For demonstration, we'll use a simple in-memory cache
     const now = Date.now();
     const hourStart = now - (now % (60 * 60 * 1000)); // Start of current hour
-    
+
     return {
       requests: 0, // Would be actual count from storage
       resetTime: hourStart + (60 * 60 * 1000) // Next hour

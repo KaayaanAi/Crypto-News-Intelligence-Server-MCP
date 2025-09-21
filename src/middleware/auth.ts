@@ -13,30 +13,63 @@ interface AuthRequest extends Request {
 }
 
 export class AuthMiddleware {
-  private config: UniversalServerConfig;
-  private apiKeys: Map<string, ApiKey> = new Map();
-  private jwtSecret: string;
+  private readonly config: UniversalServerConfig;
+  private readonly apiKeys: Map<string, ApiKey> = new Map();
+  private readonly jwtSecret: string;
 
   constructor(config: UniversalServerConfig) {
     this.config = config;
-    this.jwtSecret = config.security.authentication.jwtSecret || 'fallback-secret-change-in-production';
+    this.jwtSecret = this.initializeJwtSecret(config);
     this.initializeDefaultApiKeys();
   }
 
-  // Initialize default API keys (in production, these would come from a database)
+  // Initialize JWT secret with secure fallback
+  private initializeJwtSecret(config: UniversalServerConfig): string {
+    const secret = config.security.authentication.jwtSecret || process.env.JWT_SECRET;
+
+    if (!secret) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('JWT_SECRET environment variable is required in production');
+      }
+
+      // Generate a secure random secret for development
+      const crypto = require('crypto');
+      const generatedSecret = crypto.randomBytes(32).toString('hex');
+      console.warn('⚠️  No JWT secret configured. Generated temporary secret for development.');
+      console.warn('⚠️  Set JWT_SECRET environment variable for production!');
+      return generatedSecret;
+    }
+
+    if (secret.length < 32) {
+      throw new Error('JWT secret must be at least 32 characters long');
+    }
+
+    return secret;
+  }
+
+  // Initialize API keys from environment variables (secure method)
   private initializeDefaultApiKeys(): void {
-    const defaultKeys: ApiKey[] = [
-      {
+    const defaultKeys: ApiKey[] = [];
+
+    // Only create demo key if explicitly configured in environment
+    const demoKey = process.env.DEMO_API_KEY;
+    if (demoKey && process.env.NODE_ENV !== 'production') {
+      defaultKeys.push({
         id: uuidv4(),
-        key: this.hashApiKey('cnis-demo-key-12345'),
+        key: this.hashApiKey(demoKey),
         name: 'Demo API Key',
-        permissions: ['read', 'analyze'],
+        permissions: ['read'],
         createdAt: new Date(),
         active: true
-      },
-      {
+      });
+    }
+
+    // Only create admin key if explicitly configured
+    const adminKey = process.env.ADMIN_API_KEY;
+    if (adminKey) {
+      defaultKeys.push({
         id: uuidv4(),
-        key: this.hashApiKey('cnis-admin-key-67890'),
+        key: this.hashApiKey(adminKey),
         name: 'Admin API Key',
         permissions: ['read', 'analyze', 'admin', 'stream'],
         createdAt: new Date(),
@@ -48,14 +81,18 @@ export class AuthMiddleware {
           standardHeaders: true,
           legacyHeaders: false
         }
-      }
-    ];
+      });
+    }
 
     defaultKeys.forEach(key => {
       this.apiKeys.set(key.key, key);
     });
 
-    console.log('🔐 Initialized API keys:', defaultKeys.length);
+    if (defaultKeys.length === 0) {
+      console.log('⚠️  No API keys configured. Set ADMIN_API_KEY environment variable.');
+    } else {
+      console.log('🔐 Initialized API keys:', defaultKeys.length);
+    }
   }
 
   // Hash API key for secure storage
@@ -178,14 +215,15 @@ export class AuthMiddleware {
 
   // Permission check middleware
   requirePermission(permission: string) {
-    return (req: AuthRequest, res: Response, next: NextFunction) => {
-      if (!req.permissions || !req.permissions.includes(permission)) {
-        return res.status(403).json({
+    return (req: AuthRequest, res: Response, next: NextFunction): void => {
+      if (!req.permissions?.includes(permission)) {
+        res.status(403).json({
           error: 'Insufficient permissions',
           required: permission,
           available: req.permissions || [],
           message: `This endpoint requires '${permission}' permission`
         });
+        return;
       }
       next();
     };
@@ -193,18 +231,19 @@ export class AuthMiddleware {
 
   // Multiple permissions check (requires ALL permissions)
   requirePermissions(permissions: string[]) {
-    return (req: AuthRequest, res: Response, next: NextFunction) => {
+    return (req: AuthRequest, res: Response, next: NextFunction): void => {
       const userPermissions = req.permissions || [];
       const missingPermissions = permissions.filter(perm => !userPermissions.includes(perm));
 
       if (missingPermissions.length > 0) {
-        return res.status(403).json({
+        res.status(403).json({
           error: 'Insufficient permissions',
           required: permissions,
           missing: missingPermissions,
           available: userPermissions,
           message: `This endpoint requires permissions: ${permissions.join(', ')}`
         });
+        return;
       }
       next();
     };
@@ -212,17 +251,18 @@ export class AuthMiddleware {
 
   // Any of multiple permissions check (requires ANY permission)
   requireAnyPermission(permissions: string[]) {
-    return (req: AuthRequest, res: Response, next: NextFunction) => {
+    return (req: AuthRequest, res: Response, next: NextFunction): void => {
       const userPermissions = req.permissions || [];
       const hasAnyPermission = permissions.some(perm => userPermissions.includes(perm));
 
       if (!hasAnyPermission) {
-        return res.status(403).json({
+        res.status(403).json({
           error: 'Insufficient permissions',
           requiredAny: permissions,
           available: userPermissions,
           message: `This endpoint requires any of these permissions: ${permissions.join(', ')}`
         });
+        return;
       }
       next();
     };
@@ -239,9 +279,8 @@ export class AuthMiddleware {
       userId,
       permissions
     };
-    const secret = this.jwtSecret || 'fallback-secret';
-    
-    return jwt.sign(payload, secret, { expiresIn } as any);
+
+    return jwt.sign(payload, this.jwtSecret, { expiresIn } as any);
   }
 
   // Create new API key
@@ -268,7 +307,7 @@ export class AuthMiddleware {
 
   // Revoke API key
   async revokeApiKey(keyId: string): Promise<boolean> {
-    for (const [hashedKey, keyData] of this.apiKeys) {
+    for (const [, keyData] of this.apiKeys) {
       if (keyData.id === keyId) {
         keyData.active = false;
         return true;
@@ -285,9 +324,16 @@ export class AuthMiddleware {
   // Authentication info endpoint handler
   getAuthInfo() {
     return (req: AuthRequest, res: Response) => {
+      let authMethod = 'none';
+      if (req.apiKey) {
+        authMethod = 'api-key';
+      } else if (req.userId) {
+        authMethod = 'jwt';
+      }
+
       const authInfo = {
         authenticated: !!(req.apiKey || req.userId),
-        method: req.apiKey ? 'api-key' : req.userId ? 'jwt' : 'none',
+        method: authMethod,
         permissions: req.permissions || [],
         user: req.userId,
         apiKeyName: req.apiKey?.name,
@@ -319,7 +365,7 @@ export class AuthMiddleware {
 
   // Login endpoint (for JWT authentication)
   login() {
-    return async (req: Request, res: Response) => {
+    return async (req: Request, res: Response): Promise<void> => {
       try {
         const { username, password, apiKey } = req.body;
 
@@ -328,21 +374,26 @@ export class AuthMiddleware {
           const keyData = this.verifyApiKey(apiKey);
           if (keyData) {
             const token = this.generateJWT(keyData.id, keyData.permissions);
-            return res.json({
+            res.json({
               token,
               permissions: keyData.permissions,
               expiresIn: '24h'
             });
+            return;
           }
         } else if (username && password) {
-          // Username/password authentication (would typically check database)
-          if (username === 'admin' && password === 'changeme') {
+          // Username/password authentication - check environment variables
+          const adminUsername = process.env.ADMIN_USERNAME;
+          const adminPassword = process.env.ADMIN_PASSWORD;
+
+          if (adminUsername && adminPassword && username === adminUsername && password === adminPassword) {
             const token = this.generateJWT('admin-user', ['read', 'analyze', 'admin']);
-            return res.json({
+            res.json({
               token,
               permissions: ['read', 'analyze', 'admin'],
               expiresIn: '24h'
             });
+            return;
           }
         }
 

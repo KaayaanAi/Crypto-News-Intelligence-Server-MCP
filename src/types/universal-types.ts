@@ -1,5 +1,5 @@
 // Universal MCP Server Types - Extended from CNiS types
-import { NewsItem, AnalyzedNews, MarketSummary } from '../types.js';
+import { NewsItem, AnalyzedNews } from '../types.js';
 
 // Protocol Configuration
 export interface ProtocolConfig {
@@ -105,6 +105,8 @@ export interface WebSocketConnection {
   subscriptions: string[];
   userId?: string;
   apiKey?: string;
+  authenticated?: boolean;
+  permissions?: string[];
 }
 
 export interface WebSocketMessage {
@@ -137,7 +139,7 @@ export interface WebSocketMcpHandler extends ProtocolHandler {
   name: 'websocket-mcp';
   connections: Map<string, WebSocketConnection>;
   broadcast(message: WebSocketMessage): void;
-  handleConnection(ws: any): void;
+  handleConnection(ws: any, request?: any): void;
   handleMessage(connection: WebSocketConnection, message: any): Promise<void>;
 }
 
